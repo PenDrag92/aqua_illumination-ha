@@ -1,87 +1,128 @@
+"""UI configuration and validated IP changes for AI Wi-Fi lights."""
+
+import asyncio
+from ipaddress import ip_address
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-# FIX: Import the library from your new vendored folder
-from .aquaipy.aquaipy import AquaIPy
-from .aquaipy.error import ConnError
-from .const import DOMAIN
+from .aquaipy import AquaIPy
+from .aquaipy.error import ConnError, FirmwareError, MustBeParentError
+from .const import CONF_ENABLE_CONTROL, DOMAIN
+
+
+async def _async_validate(hass, user_input):
+    """Validate the local API without changing any light setting."""
+    host = str(ip_address(user_input["host"].strip()))
+    api = AquaIPy(session=async_get_clientsession(hass))
+    async with asyncio.timeout(30):
+        await api.async_connect(host)
+        await api.async_get_state()
+    return host, api.mac_addr
+
+
+def _error_key(error):
+    """Map expected validation failures to translated form messages."""
+    if isinstance(error, FirmwareError):
+        return "unsupported_firmware"
+    if isinstance(error, MustBeParentError):
+        return "not_parent"
+    if isinstance(error, ValueError):
+        return "invalid_host"
+    return "cannot_connect"
+
 
 class AquaIlluminationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Aqua Illumination."""
+    """Configure a parent light via its local IP address."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step where the user enters IP and Name."""
         errors = {}
-
         if user_input is not None:
-            host = user_input["host"]
-            name = user_input["name"]
-
-            # Validate the connection before allowing the entry to be created
             try:
-                ai = AquaIPy()
-                # We use a timeout to prevent the UI from hanging if IP is wrong
-                await ai.async_connect(host)
-                
-                # Check if this serial number (MAC) is already configured
-                await self.async_set_unique_id(ai.mac_addr)
+                host, mac = await _async_validate(self.hass, user_input)
+            except (
+                ConnError,
+                FirmwareError,
+                MustBeParentError,
+                TimeoutError,
+                ValueError,
+            ) as err:
+                errors["base"] = _error_key(err)
+            else:
+                # AbortFlow must not be caught as an unexpected connection error.
+                await self.async_set_unique_id(mac)
                 self._abort_if_unique_id_configured()
-
+                name = user_input["name"].strip() or "Aqua Illumination"
                 return self.async_create_entry(
-                    title=name, 
-                    data={
-                        "host": host,
-                        "name": name,
-                    }
+                    title=name, data={"host": host, "name": name}
                 )
-            except ConnError:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
-                errors["base"] = "unknown"
-
-        # Show the form to the user
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required("host"): str,
-                vol.Required("name"): str,
-            }),
+            data_schema=vol.Schema(
+                {
+                    vol.Required("host"): str,
+                    vol.Required("name", default="Aqua Illumination"): str,
+                }
+            ),
             errors=errors,
         )
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Standard options flow handler (required for 2026.3)."""
-        return AquaIlluminationOptionsFlowHandler(config_entry)
+        return AquaIlluminationOptionsFlow()
 
-class AquaIlluminationOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for the integration (e.g., changing IP later)."""
-    
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        # This line handles the assignment for you in a safe way:
-        super().__init__(config_entry)
+
+class AquaIlluminationOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Validate an IP change and reload automatically after saving options."""
 
     async def async_step_init(self, user_input=None):
-        """Manage the options."""
-        return await self.async_step_user(user_input)
-
-    async def async_step_user(self, user_input=None):
-        """Handle the options step."""
+        errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
+            try:
+                host, mac = await _async_validate(self.hass, user_input)
+            except (
+                ConnError,
+                FirmwareError,
+                MustBeParentError,
+                TimeoutError,
+                ValueError,
+            ) as err:
+                errors["base"] = _error_key(err)
+            else:
+                if self.config_entry.unique_id and mac != self.config_entry.unique_id:
+                    errors["base"] = "wrong_device"
+                else:
+                    return self.async_create_entry(
+                        title="",
+                        data={
+                            "host": host,
+                            CONF_ENABLE_CONTROL: user_input.get(
+                                CONF_ENABLE_CONTROL, False
+                            ),
+                        },
+                    )
         return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Optional(
-                    "host",
-                    default=self.config_entry.data.get("host"),
-                ): str,
-            }),
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "host",
+                        default=self.config_entry.options.get(
+                            "host", self.config_entry.data["host"]
+                        ),
+                    ): str,
+                    vol.Required(
+                        CONF_ENABLE_CONTROL,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_CONTROL, False
+                        ),
+                    ): bool,
+                }
+            ),
+            errors=errors,
         )

@@ -1,13 +1,15 @@
 {
   "domain": "aqua_illumination",
   "name": "Aqua Illumination",
-  "codeowners": ["@razza-t"],
+  "codeowners": [
+    "@PenDrag92"
+  ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/razza-t/aqua_illumination-ha",
+  "documentation": "https://github.com/PenDrag92/aqua_illumination-ha",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/razza-t/aqua_illumination-ha/issues",
+  "issue_tracker": "https://github.com/PenDrag92/aqua_illumination-ha/issues",
   "requirements": [],
-  "version": "v2026.4.0"
+  "version": "2026.10.0"
 }
