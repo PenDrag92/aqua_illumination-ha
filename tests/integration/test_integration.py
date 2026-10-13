@@ -212,6 +212,54 @@ async def test_disabling_controls_unloads_previously_loaded_platforms(
         user_input={"host": "192.0.2.10", "enable_control": False},
     )
     await hass.async_block_till_done()
-    assert not hass.states.async_all("light")
-    assert not hass.states.async_all("switch")
+    # HA keeps registry-backed placeholders after unloading these platforms.
+    controls = hass.states.async_all("light") + hass.states.async_all("switch")
+    assert controls
+    assert all(state.state == "unavailable" for state in controls)
+    assert not entry.runtime_data.control_enabled
+    with pytest.raises(HomeAssistantError, match="read only"):
+        await entry.runtime_data.async_set_channel("blue", 10)
+    lamp.async_set_colors_brightness.assert_not_awaited()
+    lamp.async_set_schedule_state.assert_not_awaited()
     assert entry.state == ConfigEntryState.LOADED
+
+
+async def test_light_service_preserves_hd_and_updates_all_sensors(hass, entry, lamp):
+    hass.config_entries.async_update_entry(entry, options={"enable_control": True})
+    coordinator = await setup(hass, entry)
+    await hass.services.async_call(
+        "light",
+        "turn_on",
+        {"entity_id": "light.reef_white", "brightness": 102},
+        blocking=True,
+    )
+    assert coordinator.data["colors"] == {"blue": 150, "white": 40}
+    assert hass.states.get("light.reef_white").attributes["brightness"] == 102
+    lamp.async_set_schedule_state.assert_not_awaited()
+
+
+async def test_schedule_service_only_changes_schedule_on_command(hass, entry, lamp):
+    hass.config_entries.async_update_entry(entry, options={"enable_control": True})
+    coordinator = await setup(hass, entry)
+    lamp.async_set_schedule_state.assert_not_awaited()
+    await hass.services.async_call(
+        "switch",
+        "turn_off",
+        {"entity_id": "switch.reef_scheduled_mode"},
+        blocking=True,
+    )
+    assert not coordinator.data["schedule"]
+    lamp.async_set_schedule_state.assert_awaited_once_with(False)
+    lamp.async_set_colors_brightness.assert_not_awaited()
+
+
+async def test_transport_failure_during_write_marks_state_unavailable(
+    hass, entry, lamp
+):
+    hass.config_entries.async_update_entry(entry, options={"enable_control": True})
+    coordinator = await setup(hass, entry)
+    lamp.async_set_colors_brightness.side_effect = ConnError("offline", "192.0.2.10")
+    with pytest.raises(HomeAssistantError, match="Unable to communicate"):
+        await coordinator.async_set_channel("white", 40)
+    assert not coordinator.last_update_success
+    assert all(state.state == "unavailable" for state in hass.states.async_all())

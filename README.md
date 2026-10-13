@@ -31,7 +31,8 @@ read makes the entities unavailable instead of reporting zero watts.
 - Bluetooth-only Hydra 32HD/64HD and Prime 16HD, and Red Sea ReefLED fixtures,
   are not supported by this Wi-Fi integration.
 - Home Assistant 2026.3+ / Python 3.14+. Automated HA tests are pinned to
-  2026.3.1 and 2026.10.1. Passing tests does not replace validation on the
+  2026.3.1 and 2026.10.1, with an additional latest-version job on each change.
+  Passing tests does not replace validation on the
   target lamps; the protocol fixtures are synthetic.
 
 ## Installation
