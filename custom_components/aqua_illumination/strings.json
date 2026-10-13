@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to an AI Wi-Fi light",
+        "description": "Enter the parent light's IP address. Setup starts in read-only mode.",
+        "data": {
+          "host": "IP address",
+          "name": "Device name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the light or its response is invalid.",
+      "unsupported_firmware": "This firmware is outside the supported range (2.0.0–2.5.1).",
+      "not_parent": "This is a child light. Enter the parent light's IP address.",
+      "invalid_host": "Enter a valid IPv4 or IPv6 address without a URL or port.",
+      "wrong_device": "This IP address belongs to a different light."
+    },
+    "abort": {
+      "already_configured": "This light is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connection and manual controls",
+        "description": "Manual control is off by default. Enabling it adds lights and a schedule switch that can change the aquarium lighting.",
+        "data": {
+          "host": "IP address",
+          "enable_control": "Enable manual control"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the light or its response is invalid.",
+      "unsupported_firmware": "This firmware is outside the supported range (2.0.0–2.5.1).",
+      "not_parent": "This is a child light. Enter the parent light's IP address.",
+      "invalid_host": "Enter a valid IPv4 or IPv6 address without a URL or port.",
+      "wrong_device": "This IP address belongs to a different light."
+    }
+  }
+}

@@ -1,6 +1,6 @@
 #
 #   Copyright 2018 Stephen Mc Gowan <mcclown@gmail.com>
-#   Modernized for HA 2026.3 / Python 3.14 by Rasmus Tornefrost 
+#   Modernized for HA 2026.3 / Python 3.14 by Rasmus Tornefrost
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@
 """Module for working with the AquaIllumination range of lights."""
 
 import asyncio
+import math
 from enum import Enum
-import json
+from ipaddress import ip_address
+
 import aiohttp
 
 # FIX 1: Use relative imports for vendoring
@@ -26,17 +28,29 @@ from .error import ConnError, FirmwareError, MustBeParentError
 
 MIN_SUPPORTED_AI_FIRMWARE_VERSION = "2.0.0"
 MAX_SUPPORTED_AI_FIRMWARE_VERSION = "2.5.1"
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+
+def _is_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
 
 # FIX 2: Replaced deleted distutils with native version parsing
 def _parse_version(version_string):
     """Safely convert a semantic version string to a tuple for comparison."""
     try:
         return tuple(map(int, version_string.split(".")))
-    except ValueError:
+    except (AttributeError, TypeError, ValueError):
         return (0, 0, 0)
+
 
 class Response(Enum):
     """Response codes, for the AquaIPy methods."""
+
     Success = 0
     Error = 1
     NoSuchColour = 2
@@ -45,12 +59,13 @@ class Response(Enum):
     AllColorsMustBeSpecified = 5
     InvalidData = 6
 
+
 class HDDevice:
     """A class for handling the conversion of data for a device."""
 
     def __init__(self, raw_data, primary_mac_address=None):
         self._primary_mac_address = primary_mac_address
-        self._mac_address = raw_data['serial_number']
+        self._mac_address = raw_data["serial_number"]
         self._mw_norm = {}
         self._mw_hd = {}
         self._max_mw = 0
@@ -62,6 +77,21 @@ class HDDevice:
             self._mw_hd[color] = value
 
         self._max_mw = raw_data["max_power"]
+
+        if (
+            not self._mw_norm
+            or self._mw_norm.keys() != self._mw_hd.keys()
+            or not _is_number(self._max_mw)
+            or self._max_mw <= 0
+            or any(
+                not _is_number(value) or value <= 0 for value in self._mw_norm.values()
+            )
+            or any(
+                not _is_number(value) or value < self._mw_norm[color]
+                for color, value in self._mw_hd.items()
+            )
+        ):
+            raise ValueError("Invalid device power calibration")
 
     @property
     def is_primary(self):
@@ -76,36 +106,40 @@ class HDDevice:
         return self._max_mw
 
     def convert_to_intensity(self, color, percentage):
-        if percentage < 0:
+        if not _is_number(percentage) or percentage < 0:
             raise ValueError("Percentage must be greater than 0")
         elif 0 <= percentage <= 100:
             return round(percentage * 10)
         else:
             max_percentage = ((self._mw_hd[color]) / self._mw_norm[color]) * 100
             if percentage > max_percentage:
-                raise ValueError(f"Percentage for {color} must be between 0 and {max_percentage}")
+                raise ValueError(
+                    f"Percentage for {color} must be between 0 and {max_percentage}"
+                )
 
             hd_percentage = percentage - 100
             hd_brightness_value = (hd_percentage / (max_percentage - 100)) * 1000
             return round(hd_brightness_value + 1000)
 
     def convert_to_percentage(self, color, intensity):
-        if intensity < 0 or intensity > 2000:
+        if not _is_number(intensity) or intensity < 0 or intensity > 2000:
             raise ValueError("intensity must be between 0 and 2000")
         elif intensity <= 1000:
-            return intensity/10
+            return intensity / 10
         else:
-            max_hd_percentage = (self._mw_hd[color] - self._mw_norm[color])/self._mw_norm[color]
+            max_hd_percentage = (
+                self._mw_hd[color] - self._mw_norm[color]
+            ) / self._mw_norm[color]
             hd_in_use = (intensity - 1000) / 1000
             return 100 + (max_hd_percentage * hd_in_use * 100)
 
     def convert_to_mw(self, color, intensity):
-        if intensity < 0 or intensity > 2000:
+        if not _is_number(intensity) or intensity < 0 or intensity > 2000:
             raise ValueError("intensity must be between 0 and 2000")
         elif intensity <= 1000:
-            return self._mw_norm[color] * (intensity/1000)
+            return self._mw_norm[color] * (intensity / 1000)
         else:
-            hd_in_use = (intensity - 1000)/1000
+            hd_in_use = (intensity - 1000) / 1000
             hd_mw_in_use = hd_in_use * (self._mw_hd[color] - self._mw_norm[color])
             return self._mw_norm[color] + hd_mw_in_use
 
@@ -124,7 +158,7 @@ class AquaIPy:
         self._other_devices = []
 
         self._loop = loop
-        self._loop_is_local = True
+        self._loop_is_local = False
 
         if self._loop is None:
             try:
@@ -138,7 +172,7 @@ class AquaIPy:
             self._create_new_event_loop()
 
         if session is None:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(timeout=REQUEST_TIMEOUT)
             self._session_is_local = True
         else:
             self._session = session
@@ -146,24 +180,36 @@ class AquaIPy:
 
     def connect(self, host, check_firmware_support=True):
         return self._loop.run_until_complete(
-            self.async_connect(host, check_firmware_support))
+            self.async_connect(host, check_firmware_support)
+        )
 
     async def async_connect(self, host, check_firmware_support=True):
         self._host = host
-        self._base_path = 'http://' + host + '/api'
-        await self._async_setup_device_details(check_firmware_support)
+        self._primary_device = None
+        self._other_devices = []
+        try:
+            address = str(ip_address(host))
+            address = f"[{address}]" if ":" in address else address
+            self._base_path = f"http://{address}/api"
+            await self._async_setup_device_details(check_firmware_support)
+        except (ConnError, FirmwareError, MustBeParentError):
+            self._base_path = None
+            raise
+        except (KeyError, TypeError, ValueError, AttributeError) as err:
+            self._base_path = None
+            raise ConnError("Invalid device metadata", host) from err
+
+    async def async_close(self):
+        """Close only sessions owned by this library, never HA's shared session."""
+        self._base_path = None
+        if self._session_is_local:
+            await self._session.close()
 
     def close(self):
-        self._base_path = None
-
-        if self._session_is_local:
-            self._loop.run_until_complete(self._session.close())
-
+        if self._loop.is_running():
+            raise RuntimeError("Use await async_close() from an async context")
+        self._loop.run_until_complete(self.async_close())
         if self._loop_is_local:
-            self._loop.stop()
-            # FIX 4: Updated deprecated all_tasks call
-            pending_tasks = asyncio.all_tasks(self._loop)
-            self._loop.run_until_complete(asyncio.gather(*pending_tasks))
             self._loop.close()
 
     @property
@@ -203,95 +249,91 @@ class AquaIPy:
         asyncio.set_event_loop(self._loop)
         self._loop_is_local = True
 
-    async def _async_setup_device_details(self, check_firmware_support):
-        r_data = None
+    async def _async_request(self, method, endpoint, **kwargs):
+        """Bound each request and reject HTTP errors or malformed API envelopes."""
+        self._validate_connection()
         try:
-            path = f"{self._base_path}/identity"
-            async with self._session.get(path) as resp:
-                r_data = await resp.json()
-        except Exception:
-            self._base_path = None
-            raise ConnError("Unable to connect to host", self._host)
+            async with self._session.request(
+                method,
+                f"{self._base_path}/{endpoint}",
+                timeout=REQUEST_TIMEOUT,
+                **kwargs,
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            raise ConnError(f"Request failed: {endpoint}", self._host) from err
+        if not isinstance(data, dict) or data.get("response_code") != 0:
+            raise ConnError(f"Invalid or rejected response: {endpoint}", self._host)
+        return data
 
-        if r_data['response_code'] != 0:
-            self._base_path = None
-            raise ConnError("Error getting response for device identity", self._host)
-
-        self._mac_addr = r_data['serial_number']
-        self._firmware_version = r_data['firmware']
-        self._product_type = r_data['product']
-
+    async def _async_setup_device_details(self, check_firmware_support):
+        data = await self._async_request("GET", "identity")
+        self._mac_addr = data["serial_number"]
+        self._firmware_version = data["firmware"]
+        self._product_type = data["product"]
+        if not isinstance(self._mac_addr, str) or not self._mac_addr:
+            raise ValueError("Missing device identity")
         if check_firmware_support and not self.supported_firmware:
-            self._base_path = None
-            raise FirmwareError("Support is not available for this version of the AquaIllumination firmware yet.", self._firmware_version)
-
-        if r_data['parent'] != "":
-            self._base_path = None
-            raise MustBeParentError("Connected to non-parent device", r_data['parent'])
-
+            raise FirmwareError("Unsupported light firmware", self._firmware_version)
+        if data["parent"] != "":
+            raise MustBeParentError("Connect to the parent light", data["parent"])
         await self._async_get_devices()
 
     async def _async_get_devices(self):
-        path = f"{self._base_path}/power"
-        async with self._session.get(path) as resp:
-            r_data = await resp.json()
-            if r_data['response_code'] != 0:
-                self._base_path = None
-                raise ConnError("Unable to retrieve device details", self._host)
-
-            self._primary_device = None
-            self._other_devices = []
-
-            for device in r_data['devices']:
-                temp = HDDevice(device, self.mac_addr)
-                if temp.is_primary:
-                    self._primary_device = temp
-                else:
-                    self._other_devices.append(temp)
+        data = await self._async_request("GET", "power")
+        self._primary_device = None
+        self._other_devices = []
+        for raw_device in data["devices"]:
+            device = HDDevice(raw_device, self.mac_addr)
+            if device.is_primary:
+                if self._primary_device is not None:
+                    raise ValueError("Duplicate primary device")
+                self._primary_device = device
+            else:
+                self._other_devices.append(device)
+        if self._primary_device is None:
+            raise ConnError("Power data is missing the parent light", self._host)
+        channels = self._primary_device._mw_norm.keys()
+        if any(device._mw_norm.keys() != channels for device in self._other_devices):
+            raise ConnError("Paired lights have incompatible channels", self._host)
 
     async def _async_get_brightness(self):
-        self._validate_connection()
-        path = f"{self._base_path}/colors"
-        async with self._session.get(path) as resp:
-            r_data = await resp.json()
-            if r_data["response_code"] != 0:
-                return Response.Error, None
-            del r_data["response_code"]
-            return Response.Success, r_data
+        data = dict(await self._async_request("GET", "colors"))
+        del data["response_code"]
+        if (
+            self._primary_device is None
+            or data.keys() != self._primary_device._mw_norm.keys()
+            or any(
+                not _is_number(value) or not 0 <= value <= 2000
+                for value in data.values()
+            )
+        ):
+            raise ConnError("Invalid channel data", self._host)
+        return Response.Success, data
 
     async def _async_set_brightness(self, body):
-        self._validate_connection()
-        path = f"{self._base_path}/colors"
-        async with self._session.post(path, json=body) as resp:
-            r_data = await resp.json()
-            if r_data["response_code"] != 0:
-                return Response.Error
-            return Response.Success
+        await self._async_request("POST", "colors", json=body)
+        return Response.Success
 
     def get_schedule_state(self):
         return self._loop.run_until_complete(self.async_get_schedule_state())
 
     async def async_get_schedule_state(self):
-        self._validate_connection()
-        path = f"{self._base_path}/schedule/enable"
-        async with self._session.get(path) as resp:
-            r_data = await resp.json()
-            if r_data is None or r_data["response_code"] != 0:
-                return None
-            return r_data["enable"]
+        data = await self._async_request("GET", "schedule/enable")
+        value = data.get("enable")
+        if not isinstance(value, (bool, int)) or value not in (0, 1):
+            raise ConnError("Invalid schedule state", self._host)
+        return bool(value)
 
     def set_schedule_state(self, enable):
         return self._loop.run_until_complete(self.async_set_schedule_state(enable))
 
     async def async_set_schedule_state(self, enable):
-        self._validate_connection()
-        data = {"enable": enable}
-        path = f"{self._base_path}/schedule/enable"
-        async with self._session.put(path, data=json.dumps(data)) as resp:
-            r_data = await resp.json()
-            if r_data is None or r_data['response_code'] != 0:
-                return Response.Error
-            return Response.Success
+        if not isinstance(enable, bool):
+            return Response.InvalidData
+        await self._async_request("PUT", "schedule/enable", json={"enable": enable})
+        return Response.Success
 
     def get_colors(self):
         return self._loop.run_until_complete(self.async_get_colors())
@@ -321,26 +363,29 @@ class AquaIPy:
         return self._loop.run_until_complete(self.async_set_colors_brightness(colors))
 
     async def async_set_colors_brightness(self, colors):
-        if len(colors) < len(await self.async_get_colors()):
+        self._validate_connection()
+        if self._primary_device is None or not isinstance(colors, dict):
+            return Response.InvalidData
+        expected = self._primary_device._mw_norm.keys()
+        if colors.keys() - expected:
+            return Response.NoSuchColour
+        if colors.keys() != expected:
             return Response.AllColorsMustBeSpecified
+        try:
+            intensities = {
+                color: self._primary_device.convert_to_intensity(color, value)
+                for color, value in colors.items()
+            }
+        except (TypeError, ValueError):
+            return Response.InvalidBrightnessValue
 
-        intensities = {}
-        mw_value = 0
-
-        for color, value in colors.items():
-            intensities[color] = self._primary_device.convert_to_intensity(color, value)
-            mw_value += self._primary_device.convert_to_mw(color, intensities[color])
-
-        if mw_value > self._primary_device.max_mw:
-            return Response.PowerLimitExceeded
-
-        for device in self._other_devices:
-            mw_value = 0
-            for color, value in intensities.items():
-                mw_value += device.convert_to_mw(color, value)
-            if mw_value > device.max_mw:
+        for device in [self._primary_device, *self._other_devices]:
+            milliwatts = sum(
+                device.convert_to_mw(color, value)
+                for color, value in intensities.items()
+            )
+            if milliwatts > device.max_mw:
                 return Response.PowerLimitExceeded
-
         return await self._async_set_brightness(intensities)
 
     def patch_colors_brightness(self, colors):
@@ -360,7 +405,9 @@ class AquaIPy:
         return await self.async_set_colors_brightness(brightness)
 
     def update_color_brightness(self, color, value):
-        return self._loop.run_until_complete(self.async_update_color_brightness(color, value))
+        return self._loop.run_until_complete(
+            self.async_update_color_brightness(color, value)
+        )
 
     async def async_update_color_brightness(self, color, value):
         if not color:
@@ -374,21 +421,29 @@ class AquaIPy:
 
         brightness[color] += value
         return await self.async_set_colors_brightness(brightness)
-    async def async_get_current_power_draw(self):
-        """Calculate the current total power draw in Watts."""
-        resp_b, intensities = await self._async_get_brightness()
-        if resp_b != Response.Success:
-            return 0.0
 
-        total_mw = 0
-        # Sum mW for the primary light
-        for color, intensity in intensities.items():
-            total_mw += self._primary_device.convert_to_mw(color, intensity)
-        
-        # Sum mW for any linked 'other' devices
-        for device in self._other_devices:
-            for color, intensity in intensities.items():
-                total_mw += device.convert_to_mw(color, intensity)
-
-        # Convert milliwatts to Watts
+    def _calculate_power(self, intensities):
+        """Estimate LED watts for all paired lights using their calibration."""
+        total_mw = sum(
+            device.convert_to_mw(color, intensity)
+            for device in [self._primary_device, *self._other_devices]
+            for color, intensity in intensities.items()
+        )
         return round(total_mw / 1000.0, 2)
+
+    async def async_get_current_power_draw(self):
+        _, intensities = await self._async_get_brightness()
+        return self._calculate_power(intensities)
+
+    async def async_get_state(self):
+        """Use the same brightness sample for percentages and estimated power."""
+        _, intensities = await self._async_get_brightness()
+        schedule = await self.async_get_schedule_state()
+        return {
+            "colors": {
+                color: self._primary_device.convert_to_percentage(color, value)
+                for color, value in intensities.items()
+            },
+            "schedule": schedule,
+            "power": self._calculate_power(intensities),
+        }

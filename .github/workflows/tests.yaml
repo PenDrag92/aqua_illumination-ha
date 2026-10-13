@@ -1,0 +1,41 @@
+name: Python and Home Assistant tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - home-assistant: "2026.3.1"
+            test-plugin: "0.13.317"
+          - home-assistant: "2026.10.1"
+            test-plugin: "0.13.372"
+          - home-assistant: "latest"
+            test-plugin: ""
+    name: HA ${{ matrix.home-assistant }} / Python 3.14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install test dependencies
+        env:
+          TEST_PLUGIN_VERSION: ${{ matrix.test-plugin }}
+        run: |
+          requirement="pytest-homeassistant-custom-component"
+          if [ -n "$TEST_PLUGIN_VERSION" ]; then
+            requirement="$requirement==$TEST_PLUGIN_VERSION"
+          fi
+          python -m pip install "$requirement" ruff==0.17.0
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m pytest -q

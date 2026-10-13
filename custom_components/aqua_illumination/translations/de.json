@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AI-WLAN-Lampe verbinden",
+        "description": "IP-Adresse der übergeordneten Lampe eingeben. Die Integration startet nur lesend.",
+        "data": {
+          "host": "IP-Adresse",
+          "name": "Gerätename"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Die Lampe ist nicht erreichbar oder liefert eine ungültige Antwort.",
+      "unsupported_firmware": "Diese Firmware liegt außerhalb des unterstützten Bereichs (2.0.0–2.5.1).",
+      "not_parent": "Dies ist eine untergeordnete Lampe. Bitte die IP-Adresse der übergeordneten Lampe eingeben.",
+      "invalid_host": "Bitte eine gültige IPv4- oder IPv6-Adresse ohne URL oder Port eingeben.",
+      "wrong_device": "Unter dieser IP-Adresse antwortet eine andere Lampe."
+    },
+    "abort": {
+      "already_configured": "Diese Lampe ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Verbindung und manuelle Steuerung",
+        "description": "Die manuelle Steuerung ist zunächst ausgeschaltet. Ihre Aktivierung ergänzt Lichtregler und einen Zeitplanschalter, die die Aquarienbeleuchtung verändern können.",
+        "data": {
+          "host": "IP-Adresse",
+          "enable_control": "Manuelle Steuerung aktivieren"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Die Lampe ist nicht erreichbar oder liefert eine ungültige Antwort.",
+      "unsupported_firmware": "Diese Firmware liegt außerhalb des unterstützten Bereichs (2.0.0–2.5.1).",
+      "not_parent": "Dies ist eine untergeordnete Lampe. Bitte die IP-Adresse der übergeordneten Lampe eingeben.",
+      "invalid_host": "Bitte eine gültige IPv4- oder IPv6-Adresse ohne URL oder Port eingeben.",
+      "wrong_device": "Unter dieser IP-Adresse antwortet eine andere Lampe."
+    }
+  }
+}

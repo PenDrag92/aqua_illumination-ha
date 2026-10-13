@@ -31,7 +31,7 @@ class ConnError(Error):
 
     def __init__(self, message, host):
         """Initialise ConnError."""
-        super().__init__()
+        super().__init__(message)
         self.message = message
         self.host = host
 
@@ -45,7 +45,7 @@ class FirmwareError(Error):
 
     def __init__(self, message, firmware_version):
         """Initialise FirmwareError."""
-        super().__init__()
+        super().__init__(message)
         self.message = message
         self.firmware_version = firmware_version
 
@@ -63,6 +63,6 @@ class MustBeParentError(Error):
 
     def __init__(self, message, parent_identifier):
         """Initialise MustBeParentError."""
-        super().__init__()
+        super().__init__(message)
         self.message = message
         self.parent_identifier = parent_identifier

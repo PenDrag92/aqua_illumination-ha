@@ -16,7 +16,7 @@
 
 """*AquaiPy* provides an API for the AquaIllumination range of lights."""
 
-# This line tells Python: 
+# This line tells Python:
 # "Inside the file aquaipy.py, find the class named AquaIPy and make it available."
 from .aquaipy import AquaIPy  # noqa: F401
 
