@@ -247,7 +247,8 @@ async def test_unload_cancels_in_flight_retry(hass, entry, lamp):
         await first_attempt.wait()
         queued_refresh = asyncio.create_task(coordinator.async_refresh())
         await asyncio.sleep(0)
-        assert len(coordinator._active_polls) == 2
+        # Newer HA queues this refresh before it enters our reader.
+        assert not queued_refresh.done()
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
         assert refresh.done()
