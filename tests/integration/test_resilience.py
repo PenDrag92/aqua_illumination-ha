@@ -245,9 +245,13 @@ async def test_unload_cancels_in_flight_retry(hass, entry, lamp):
     with patch(f"{MODULE}.READ_RETRY_DELAY", 30):
         refresh = asyncio.create_task(coordinator.async_refresh())
         await first_attempt.wait()
+        queued_refresh = asyncio.create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        assert len(coordinator._active_polls) == 2
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
         assert refresh.done()
+        assert queued_refresh.done()
     lamp.async_get_state.assert_awaited_once()
     assert coordinator._cancel_expiry is None
 

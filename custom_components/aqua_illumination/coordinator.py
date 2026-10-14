@@ -61,7 +61,7 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
         self._cache_allowed = False
         self._using_cached_data = False
         self._cancel_expiry = None
-        self._active_poll = None
+        self._active_polls = set()
 
     @property
     def data_stale(self):
@@ -156,7 +156,8 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         _LOGGER.debug("Refreshing light state (read only)")
-        self._active_poll = asyncio.current_task()
+        task = asyncio.current_task()
+        self._active_polls.add(task)
         try:
             async with self._device_lock, asyncio.timeout(30):
                 return self._record_success(await self._async_poll())
@@ -193,15 +194,17 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
                 self.async_update_listeners()
             raise UpdateFailed(str(err)) from err
         finally:
-            self._active_poll = None
+            self._active_polls.discard(task)
 
     async def async_shutdown(self):
         """Cancel delayed expiry and any read retry when unloading."""
         self._cancel_cache_expiry()
         await super().async_shutdown()
-        if (task := self._active_poll) and task is not asyncio.current_task():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        tasks = self._active_polls - {asyncio.current_task()}
+        if tasks:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             self._async_unsub_refresh()
 
     async def async_set_channel(self, channel, brightness):
