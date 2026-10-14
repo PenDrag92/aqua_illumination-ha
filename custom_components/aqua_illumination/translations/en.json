@@ -25,10 +25,11 @@
     "step": {
       "init": {
         "title": "Connection and manual controls",
-        "description": "Manual control is off by default. Enabling it adds lights and a schedule switch that can change the aquarium lighting.",
+        "description": "Manual control adds lights and a schedule switch. Poll every 10–60 seconds (default: 30). Temporary connection failures automatically increase the interval.",
         "data": {
           "host": "IP address",
-          "enable_control": "Enable manual control"
+          "enable_control": "Enable manual control",
+          "poll_interval": "Polling interval (seconds)"
         }
       }
     },
@@ -37,7 +38,8 @@
       "unsupported_firmware": "This firmware is outside the supported range (2.0.0–2.5.1).",
       "not_parent": "This is a child light. Enter the parent light's IP address.",
       "invalid_host": "Enter a valid IPv4 or IPv6 address without a URL or port.",
-      "wrong_device": "This IP address belongs to a different light."
+      "wrong_device": "This IP address belongs to a different light.",
+      "invalid_poll_interval": "Enter a polling interval between 10 and 60 seconds."
     }
   }
 }

@@ -23,7 +23,12 @@ def lamp():
     api.mac_addr = MAC
     api.name = "Reef"
     api.firmware_version = "2.5.1"
-    state = {"colors": {"blue": 150.0, "white": 20.0}, "schedule": True, "power": 19.0}
+    state = {
+        "colors": {"blue": 150.0, "white": 20.0},
+        "schedule": True,
+        "power": 19.0,
+        "device_count": 3,
+    }
     api.async_connect = AsyncMock()
     api.async_get_state = AsyncMock(side_effect=lambda: deepcopy(state))
 

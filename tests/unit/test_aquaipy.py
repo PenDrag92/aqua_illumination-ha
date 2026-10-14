@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 from aquaipy.aquaipy import AquaIPy, HDDevice, Response
-from aquaipy.error import ConnError, FirmwareError, MustBeParentError
+from aquaipy.error import (
+    ConnError,
+    FirmwareError,
+    MustBeParentError,
+    TransientConnectionError,
+)
 
 MAC = "00:11:22:33:44:55"
 IDENTITY = {
@@ -73,6 +78,7 @@ async def test_snapshot_reads_once_and_preserves_hd():
         "colors": {"blue": 150.0, "white": 50.0},
         "schedule": True,
         "power": 50.0,
+        "device_count": 2,
     }
     calls = session.request.call_args_list
     assert len(calls) == 4
@@ -101,6 +107,38 @@ async def test_cancellation_propagates():
     api, _ = make_api(asyncio.CancelledError())
     with pytest.raises(asyncio.CancelledError):
         await api.async_connect("192.0.2.10")
+
+
+@pytest.mark.parametrize(
+    ("error", "transient"),
+    [
+        (TimeoutError(), True),
+        (aiohttp.ClientConnectionError(), True),
+        (aiohttp.ClientPayloadError(), True),
+        (ValueError("bad JSON"), False),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=400), False),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=401), False),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=408), True),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=429), True),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=503), True),
+        (aiohttp.ContentTypeError(MagicMock(), (), status=200), False),
+    ],
+)
+async def test_only_transport_and_temporary_http_errors_are_retryable(error, transient):
+    api, session = make_api(error)
+    with pytest.raises(ConnError) as caught:
+        await api.async_connect("192.0.2.10")
+    assert isinstance(caught.value, TransientConnectionError) == transient
+    assert caught.value.endpoint
+    session.request.assert_called_once()
+
+
+async def test_transport_error_never_replays_a_write():
+    api, session = await connect(TimeoutError())
+    with pytest.raises(TransientConnectionError):
+        await api.async_set_colors_brightness({"blue": 50, "white": 20})
+    assert len(session.request.call_args_list) == 3
+    assert session.request.call_args_list[-1].args[0] == "POST"
 
 
 @pytest.mark.parametrize("firmware", ["1.9.9", "2.5.2", "3.0.0", None, "broken"])

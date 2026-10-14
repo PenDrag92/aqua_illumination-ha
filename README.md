@@ -5,7 +5,8 @@ A maintained fork of [razza-t/aqua_illumination-ha](https://github.com/razza-t/a
 
 ## Read-only first
 
-New installations and upgrades start with **sensors only**. Setup, polling,
+New installations start with **sensors only**. Updates of this fork preserve the
+saved IP address, name and manual-control option. Setup, polling,
 reconnection, diagnostics and unloading do not change brightness or the internal
 lighting schedule.
 
@@ -14,12 +15,42 @@ Available sensors:
 - Each color channel's brightness percentage, including HD values above 100%.
 - Internal schedule status (Scheduled / Manual).
 - Firmware version and connection status.
+- Last successful update and the detected number of lights (parent + children).
 - **Estimated LED power** in watts, including linked lights.
 
 The power value is calculated from channel intensities and the lamps' own
 power tables. It is not measured mains power, excludes unmodelled losses and
-standby consumption, and is not an accumulated kWh energy counter. A failed
-read makes the entities unavailable instead of reporting zero watts.
+standby consumption, and is not an accumulated kWh energy counter. The power
+sensor also shows `detected_lights` and `child_lights`; no manual count is needed.
+Failed reads never produce a substitute zero-watt reading.
+
+## Temporary Wi-Fi outages
+
+The normal polling interval is **30 seconds**, configurable from 10 to 60 seconds
+in the integration options. A transient read failure gets one retry after two
+seconds within the same 30-second polling deadline. Repeated failed cycles use
+longer intervals (30, 60, then at most 120 seconds with the defaults) and stop
+making the extra retry. A successful read restores the configured interval.
+
+For transient transport failures only, sensors retain their last complete
+snapshot for **at most 120 seconds from its successful read**. During this grace
+period, Connection Status shows **Reconnecting**, the sensors carry
+`data_stale: true` and `last_successful_update`, and the Last Successful Update
+sensor keeps its original timestamp. These are held readings, not measurements
+of what happened during the outage; downstream energy estimates may therefore
+be approximate. Automations that need a fresh value should check `data_stale`.
+
+An independent timer makes readings unavailable when the grace period expires,
+even while a slow request or backoff is pending. Connection Status then shows
+**Disconnected** and stays visible. A valid response restores **Connected**.
+Invalid replies, unsupported firmware and a different lamp at the saved IP cause
+immediate unavailability. Optional light and switch controls are unavailable
+while readings are stale.
+
+Commands are never automatically repeated. A missing write response or failed
+confirmation read makes readings unavailable immediately, because the command
+may already have reached the lamp. Reconnection only reads the lamp; it does not
+replay a brightness setting or toggle its internal schedule.
 
 ## Compatibility
 
@@ -77,7 +108,9 @@ switches the lamps into manual mode.
 
 Use **Download diagnostics** on the integration's menu. This exports the cached
 snapshot and update status, with IP addresses and the configured name redacted;
-device identifiers are omitted.
+device identifiers are omitted. Connection diagnostics include retry and failed
+update counts since integration startup, the current polling interval and the
+last read error's type, endpoint and time.
 
 Home Assistant's **Enable debug logging** action captures integration/coordinator
 activity. Disable it again after reproducing a problem. The integration logs

@@ -25,10 +25,11 @@
     "step": {
       "init": {
         "title": "Verbindung und manuelle Steuerung",
-        "description": "Die manuelle Steuerung ist zunächst ausgeschaltet. Ihre Aktivierung ergänzt Lichtregler und einen Zeitplanschalter, die die Aquarienbeleuchtung verändern können.",
+        "description": "Die manuelle Steuerung ergänzt Lichtregler und einen Zeitplanschalter. Abfrage alle 10–60 Sekunden (Standard: 30). Bei Verbindungsproblemen verlängert sich der Abstand automatisch.",
         "data": {
           "host": "IP-Adresse",
-          "enable_control": "Manuelle Steuerung aktivieren"
+          "enable_control": "Manuelle Steuerung aktivieren",
+          "poll_interval": "Abfrageintervall (Sekunden)"
         }
       }
     },
@@ -37,7 +38,8 @@
       "unsupported_firmware": "Diese Firmware liegt außerhalb des unterstützten Bereichs (2.0.0–2.5.1).",
       "not_parent": "Dies ist eine untergeordnete Lampe. Bitte die IP-Adresse der übergeordneten Lampe eingeben.",
       "invalid_host": "Bitte eine gültige IPv4- oder IPv6-Adresse ohne URL oder Port eingeben.",
-      "wrong_device": "Unter dieser IP-Adresse antwortet eine andere Lampe."
+      "wrong_device": "Unter dieser IP-Adresse antwortet eine andere Lampe.",
+      "invalid_poll_interval": "Bitte ein Abfrageintervall zwischen 10 und 60 Sekunden eingeben."
     }
   }
 }

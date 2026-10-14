@@ -10,7 +10,14 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .aquaipy import AquaIPy
 from .aquaipy.error import ConnError, FirmwareError, MustBeParentError
-from .const import CONF_ENABLE_CONTROL, DOMAIN
+from .const import (
+    CONF_ENABLE_CONTROL,
+    CONF_POLL_INTERVAL,
+    DEFAULT_POLL_INTERVAL,
+    DOMAIN,
+)
+
+POLL_INTERVAL_SCHEMA = vol.All(vol.Coerce(int), vol.Range(min=10, max=60))
 
 
 async def _async_validate(hass, user_input):
@@ -84,7 +91,17 @@ class AquaIlluminationOptionsFlow(config_entries.OptionsFlowWithReload):
         errors = {}
         if user_input is not None:
             try:
+                poll_interval = POLL_INTERVAL_SCHEMA(
+                    user_input.get(
+                        CONF_POLL_INTERVAL,
+                        self.config_entry.options.get(
+                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+                        ),
+                    )
+                )
                 host, mac = await _async_validate(self.hass, user_input)
+            except vol.Invalid:
+                errors["base"] = "invalid_poll_interval"
             except (
                 ConnError,
                 FirmwareError,
@@ -102,8 +119,12 @@ class AquaIlluminationOptionsFlow(config_entries.OptionsFlowWithReload):
                         data={
                             "host": host,
                             CONF_ENABLE_CONTROL: user_input.get(
-                                CONF_ENABLE_CONTROL, False
+                                CONF_ENABLE_CONTROL,
+                                self.config_entry.options.get(
+                                    CONF_ENABLE_CONTROL, False
+                                ),
                             ),
+                            CONF_POLL_INTERVAL: poll_interval,
                         },
                     )
         return self.async_show_form(
@@ -122,6 +143,12 @@ class AquaIlluminationOptionsFlow(config_entries.OptionsFlowWithReload):
                             CONF_ENABLE_CONTROL, False
                         ),
                     ): bool,
+                    vol.Required(
+                        CONF_POLL_INTERVAL,
+                        default=self.config_entry.options.get(
+                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+                        ),
+                    ): POLL_INTERVAL_SCHEMA,
                 }
             ),
             errors=errors,

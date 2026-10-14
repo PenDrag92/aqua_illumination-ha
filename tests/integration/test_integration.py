@@ -52,7 +52,7 @@ async def test_unreachable_setup_retries(hass, entry, lamp):
     lamp.async_set_colors_brightness.assert_not_awaited()
 
 
-async def test_disconnect_marks_all_entities_unavailable_and_recovers(
+async def test_invalid_reply_marks_measurements_unavailable_and_recovers(
     hass, entry, lamp
 ):
     coordinator = await setup(hass, entry)
@@ -60,7 +60,8 @@ async def test_disconnect_marks_all_entities_unavailable_and_recovers(
     lamp.async_get_state.side_effect = ConnError("offline", "192.0.2.10")
     await coordinator.async_refresh()
     assert not coordinator.last_update_success
-    assert all(state.state == "unavailable" for state in hass.states.async_all())
+    assert hass.states.get("sensor.reef_estimated_led_power").state == "unavailable"
+    assert hass.states.get("sensor.reef_connection_status").state == "Disconnected"
     lamp.async_get_state.side_effect = original
     await coordinator.async_refresh()
     assert coordinator.last_update_success
@@ -262,4 +263,5 @@ async def test_transport_failure_during_write_marks_state_unavailable(
     with pytest.raises(HomeAssistantError, match="Unable to communicate"):
         await coordinator.async_set_channel("white", 40)
     assert not coordinator.last_update_success
-    assert all(state.state == "unavailable" for state in hass.states.async_all())
+    assert hass.states.get("sensor.reef_estimated_led_power").state == "unavailable"
+    assert hass.states.get("sensor.reef_connection_status").state == "Disconnected"

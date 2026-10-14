@@ -19,6 +19,12 @@ async def async_get_config_entry_diagnostics(hass, entry):
             else None
         ),
         "firmware": coordinator.api.firmware_version,
+        "connection": coordinator.connection_diagnostics,
+        "last_successful_update": (
+            coordinator.last_successful_update.isoformat()
+            if coordinator.last_successful_update
+            else None
+        ),
         "state": coordinator.data,
         "power_is_estimated": True,
     }

@@ -24,7 +24,7 @@ from ipaddress import ip_address
 import aiohttp
 
 # FIX 1: Use relative imports for vendoring
-from .error import ConnError, FirmwareError, MustBeParentError
+from .error import ConnError, FirmwareError, MustBeParentError, TransientConnectionError
 
 MIN_SUPPORTED_AI_FIRMWARE_VERSION = "2.0.0"
 MAX_SUPPORTED_AI_FIRMWARE_VERSION = "2.5.1"
@@ -261,10 +261,33 @@ class AquaIPy:
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
-        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-            raise ConnError(f"Request failed: {endpoint}", self._host) from err
+        except aiohttp.ClientResponseError as err:
+            error_type = (
+                TransientConnectionError
+                if err.status in (408, 429) or err.status >= 500
+                else ConnError
+            )
+            raise error_type(
+                f"HTTP request failed: {endpoint}", self._host, endpoint=endpoint
+            ) from err
+        except (
+            aiohttp.ClientConnectionError,
+            aiohttp.ClientPayloadError,
+            TimeoutError,
+        ) as err:
+            raise TransientConnectionError(
+                f"Request failed: {endpoint}", self._host, endpoint=endpoint
+            ) from err
+        except (aiohttp.ClientError, ValueError) as err:
+            raise ConnError(
+                f"Invalid response: {endpoint}", self._host, endpoint=endpoint
+            ) from err
         if not isinstance(data, dict) or data.get("response_code") != 0:
-            raise ConnError(f"Invalid or rejected response: {endpoint}", self._host)
+            raise ConnError(
+                f"Invalid or rejected response: {endpoint}",
+                self._host,
+                endpoint=endpoint,
+            )
         return data
 
     async def _async_setup_device_details(self, check_firmware_support):
@@ -446,4 +469,5 @@ class AquaIPy:
             },
             "schedule": schedule,
             "power": self._calculate_power(intensities),
+            "device_count": 1 + len(self._other_devices),
         }
