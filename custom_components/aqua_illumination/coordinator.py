@@ -187,6 +187,10 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
                         )
                     return self.data
             self._invalidate_cache()
+            if not self.last_update_success:
+                # The base coordinator skips listeners on repeated failures.
+                # Keep the always-available diagnostic status counters current.
+                self.async_update_listeners()
             raise UpdateFailed(str(err)) from err
         finally:
             self._active_poll = None
@@ -198,6 +202,7 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
         if (task := self._active_poll) and task is not asyncio.current_task():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+            self._async_unsub_refresh()
 
     async def async_set_channel(self, channel, brightness):
         """Change one channel without losing concurrent updates to other channels."""

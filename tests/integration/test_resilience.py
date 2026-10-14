@@ -5,6 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from homeassistant.data_entry_flow import InvalidData
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
@@ -75,7 +76,10 @@ async def test_short_outage_keeps_explicitly_stale_snapshot_then_recovers(
         assert coordinator.last_update_success
         assert coordinator.data_stale
         assert coordinator.last_successful_update == last_success
-        assert hass.states.get(STAMP).state == last_success.isoformat()
+        assert (
+            hass.states.get(STAMP).state
+            == last_success.replace(microsecond=0).isoformat()
+        )
         power = hass.states.get(POWER)
         assert power.state == "19.0"
         assert power.attributes["data_stale"]
@@ -137,7 +141,7 @@ async def test_expiry_timer_marks_unavailable_without_another_poll(
     assert hass.states.get(POWER).state == "unavailable"
     assert hass.states.get(STATUS).state == "Disconnected"
     assert coordinator.last_successful_update == stamp
-    assert hass.states.get(STAMP).state == stamp.isoformat()
+    assert hass.states.get(STAMP).state == stamp.replace(microsecond=0).isoformat()
 
 
 async def test_snapshot_older_than_grace_is_not_republished(hass, entry, lamp):
@@ -149,6 +153,31 @@ async def test_snapshot_older_than_grace_is_not_republished(hass, entry, lamp):
     assert not coordinator.last_update_success
     assert coordinator._cancel_expiry is None
     assert hass.states.get(POWER).state == "unavailable"
+
+
+async def test_status_counters_keep_updating_after_cache_expires(hass, entry, lamp):
+    with patch(f"{MODULE}.monotonic", return_value=1000) as clock:
+        coordinator = await setup(hass, entry)
+        clock.return_value += 121
+        lamp.async_get_state.side_effect = offline()
+        for expected_failures in (1, 2, 3):
+            await coordinator.async_refresh()
+            status = hass.states.get(STATUS)
+            assert status.state == "Disconnected"
+            assert status.attributes["consecutive_failed_updates"] == expected_failures
+        assert status.attributes["current_interval_seconds"] == 120
+        lamp.async_get_state.side_effect = None
+        lamp.async_get_state.return_value = {
+            "colors": {"blue": 5, "white": 0},
+            "schedule": True,
+            "power": 1.5,
+            "device_count": 3,
+        }
+        await coordinator.async_refresh()
+    assert hass.states.get(POWER).state == "1.5"
+    assert hass.states.get(STATUS).state == "Connected"
+    assert not coordinator.data_stale
+    assert coordinator.update_interval == timedelta(seconds=30)
 
 
 @pytest.mark.parametrize(
@@ -253,15 +282,17 @@ async def test_poll_option_preserves_ip_and_enabled_controls(hass, entry, lamp):
 @pytest.mark.parametrize("value", [0, 9, 61, "invalid"])
 async def test_invalid_poll_option_does_not_contact_lamp(hass, entry, lamp, value):
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        user_input={
-            "host": "192.0.2.10",
-            "enable_control": False,
-            "poll_interval": value,
-        },
-    )
-    assert result["errors"] == {"base": "invalid_poll_interval"}
+    with pytest.raises(InvalidData) as caught:
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                "host": "192.0.2.10",
+                "enable_control": False,
+                "poll_interval": value,
+            },
+        )
+    assert caught.value.path == ["poll_interval"]
+    assert not entry.options
     lamp.async_connect.assert_not_awaited()
 
 
