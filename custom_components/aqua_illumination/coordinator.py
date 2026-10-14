@@ -26,6 +26,9 @@ from .const import (
     DOMAIN,
     MAX_POLL_INTERVAL,
     READ_RETRY_DELAY,
+    SCHEDULE_READ_TIMEOUT,
+    SCHEDULE_REFRESH_SECONDS,
+    SCHEDULE_RETRY_SECONDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +65,10 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
         self._using_cached_data = False
         self._cancel_expiry = None
         self._active_polls = set()
+        self.schedule_plan = None
+        self.schedule_last_read = None
+        self.schedule_last_error = None
+        self._next_schedule_read = 0
 
     @property
     def data_stale(self):
@@ -87,6 +94,48 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
             "cache_grace_seconds": CACHE_GRACE_SECONDS,
             "last_read_error": self.last_read_error,
         }
+
+    @property
+    def schedule_diagnostics(self):
+        """Keep plan freshness separate from live brightness availability."""
+        return {
+            "last_read": (
+                self.schedule_last_read.isoformat() if self.schedule_last_read else None
+            ),
+            "last_read_error": self.schedule_last_error,
+            "refresh_interval_seconds": SCHEDULE_REFRESH_SECONDS,
+            "cached": bool(
+                self.schedule_last_error
+                or not self.last_update_success
+                or self.data_stale
+            ),
+        }
+
+    async def _async_read_schedule_if_due(self):
+        """Optional metadata has its own deadline and cannot fail live readings."""
+        if monotonic() < self._next_schedule_read:
+            return
+        self._next_schedule_read = monotonic() + SCHEDULE_RETRY_SECONDS
+        try:
+            async with asyncio.timeout(SCHEDULE_READ_TIMEOUT):
+                plan = await self.api.async_get_schedule_plan()
+        except _READ_ERRORS as err:
+            self.schedule_last_error = {
+                "type": type(err).__name__,
+                "endpoint": getattr(err, "endpoint", None),
+                "time": dt_util.utcnow().isoformat(),
+            }
+            _LOGGER.debug("Daily schedule read failed: %s", type(err).__name__)
+            return
+        self.schedule_plan = plan
+        self.schedule_last_read = dt_util.utcnow()
+        self.schedule_last_error = None
+        self._next_schedule_read = monotonic() + SCHEDULE_REFRESH_SECONDS
+
+    async def async_refresh_schedule(self):
+        """Request a fresh, serialized read through the normal coordinator."""
+        self._next_schedule_read = 0
+        await self.async_request_refresh()
 
     def _cancel_cache_expiry(self):
         if self._cancel_expiry is not None:
@@ -159,8 +208,11 @@ class AquaIlluminationCoordinator(DataUpdateCoordinator):
         task = asyncio.current_task()
         self._active_polls.add(task)
         try:
-            async with self._device_lock, asyncio.timeout(30):
-                return self._record_success(await self._async_poll())
+            async with self._device_lock:
+                async with asyncio.timeout(30):
+                    state = self._record_success(await self._async_poll())
+                await self._async_read_schedule_if_due()
+                return state
         except _READ_ERRORS as err:
             self._connected = False
             self.consecutive_failures += 1

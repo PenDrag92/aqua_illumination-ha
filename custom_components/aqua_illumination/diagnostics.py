@@ -20,6 +20,7 @@ async def async_get_config_entry_diagnostics(hass, entry):
         ),
         "firmware": coordinator.api.firmware_version,
         "connection": coordinator.connection_diagnostics,
+        "schedule_read": coordinator.schedule_diagnostics,
         "last_successful_update": (
             coordinator.last_successful_update.isoformat()
             if coordinator.last_successful_update

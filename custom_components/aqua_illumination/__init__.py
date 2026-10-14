@@ -21,7 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator = AquaIlluminationCoordinator(hass, entry, api, host)
     await coordinator.async_config_entry_first_refresh()
-    coordinator.platforms = [Platform.SENSOR]
+    coordinator.platforms = [Platform.SENSOR, Platform.BUTTON]
     if entry.options.get(CONF_ENABLE_CONTROL, False):
         coordinator.platforms.extend([Platform.LIGHT, Platform.SWITCH])
     entry.runtime_data = coordinator

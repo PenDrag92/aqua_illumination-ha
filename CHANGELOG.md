@@ -1,5 +1,19 @@
 # Changes
 
+## 2026.10.2
+
+- Read the full daily base program, modifier flags and clock from the parent lamp.
+- Add Schedule Plan with channel curves and estimated LED power for all linked lights.
+- Preserve HD conversion corners and the wrap back to midnight in chart data.
+- Read the plan every 30 minutes, plus a read-only Refresh Schedule button.
+- Isolate optional plan failures from live readings; retain clearly labelled cached plans and retry after five minutes.
+- Add malformed-plan, HD, midnight, caching, timeout, refresh and unload tests.
+- Include a dashboard example; retain the saved IP and manual-control settings.
+
+The base program excludes acclimation, lunar and storm effects; their enabled
+flags are reported separately. No schedule-preview or schedule-write endpoint
+is used by this feature.
+
 ## 2026.10.1
 
 - Poll every 30 seconds by default; allow 10–60 seconds in the integration options.
