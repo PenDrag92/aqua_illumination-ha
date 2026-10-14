@@ -20,6 +20,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             AILastSuccessfulUpdateSensor(coordinator),
             AIDiagnosticSensor(coordinator, "Detected Lights", "detected_lights"),
             AIScheduleSensor(coordinator),
+            AISchedulePlanSensor(coordinator),
             *(
                 AIChannelBrightnessSensor(coordinator, channel)
                 for channel in coordinator.data["colors"]
@@ -86,6 +87,31 @@ class AIScheduleSensor(AquaIlluminationEntity, SensorEntity):
     @property
     def native_value(self):
         return "Scheduled" if self.coordinator.data["schedule"] else "Manual"
+
+
+class AISchedulePlanSensor(AquaIlluminationEntity, SensorEntity):
+    """Cached base curve, distinct from the lamp's current measured state."""
+
+    _attr_icon = "mdi:chart-timeline-variant"
+    _unrecorded_attributes = frozenset({"channels", "power_curve"})
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "schedule_plan", "Schedule Plan")
+
+    @property
+    def available(self):
+        return self.coordinator.schedule_plan is not None
+
+    @property
+    def native_value(self):
+        return "Cached" if self.coordinator.schedule_diagnostics["cached"] else "Loaded"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            **(self.coordinator.schedule_plan or {}),
+            **self.coordinator.schedule_diagnostics,
+        }
 
 
 class AIDiagnosticSensor(AquaIlluminationEntity, SensorEntity):

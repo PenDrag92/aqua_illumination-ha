@@ -188,6 +188,182 @@ async def test_invalid_schedule_is_not_reported_as_off(schedule):
         await api.async_get_schedule_state()
 
 
+DAILY_SCHEDULE = {
+    "response_code": 0,
+    "name": "default",
+    "ramps": [
+        {
+            "color": "blue",
+            "points": [
+                {"time": 0, "intensity": 0},
+                {"time": 600, "intensity": 1500},
+                {"time": 1200, "intensity": 0},
+            ],
+        },
+        {
+            "color": "white",
+            "points": [
+                {"time": 0, "intensity": 0},
+                {"time": 720, "intensity": 2000},
+                {"time": 1200, "intensity": 0},
+            ],
+        },
+    ],
+}
+LAMP_CLOCK = {
+    "response_code": 0,
+    "year": 2026,
+    "month": 9,
+    "day": 14,
+    "hours": 7,
+    "minutes": 58,
+    "seconds": 49,
+    "gmt_offset": 7200,
+}
+MODIFIER_OFF = {"response_code": 0, "enable": False}
+
+
+async def test_daily_plan_is_read_only_and_includes_hd_corners_and_children():
+    child = {**POWER, "serial_number": "child"}
+    api, session = await connect(
+        DAILY_SCHEDULE,
+        MODIFIER_OFF,
+        MODIFIER_OFF,
+        {"response_code": 0, "enable": True},
+        LAMP_CLOCK,
+        power=[POWER, child],
+    )
+    plan = await api.async_get_schedule_plan()
+    assert plan["lamp_time_at_read"] == "2026-10-14T07:58:49+02:00"
+    assert plan["modifiers"] == {"acclimation": False, "lunar": False, "storm": True}
+    assert plan["base_schedule"]
+    assert plan["device_count"] == 2
+    white = {p["minute"]: p["brightness"] for p in plan["channels"]["white"]}
+    assert white == {0: 0, 360: 100, 720: 150, 960: 100, 1200: 0, 1440: 0}
+    power = {p["minute"]: p["power"] for p in plan["power_curve"]}
+    assert power[0] == power[1440] == 0
+    assert power[720] == 84  # 12 W blue + 30 W white, on each of two lights.
+    assert all(call.args[0] == "GET" for call in session.request.call_args_list)
+    endpoints = [
+        call.args[1].rsplit("/api/", 1)[1] for call in session.request.call_args_list
+    ]
+    assert endpoints == [
+        "identity",
+        "power",
+        "schedule",
+        "schedule/acclimation",
+        "schedule/lunar",
+        "schedule/storm",
+        "time",
+    ]
+    assert DAILY_SCHEDULE["ramps"][0]["points"][-1]["time"] == 1200
+
+
+@pytest.mark.parametrize(
+    "points",
+    [
+        None,
+        {},
+        [None],
+        [{"time": 0}],
+        [{"time": -1, "intensity": 0}],
+        [{"time": True, "intensity": 0}],
+        [{"time": 0.5, "intensity": 0}],
+        [{"time": 0, "intensity": True}],
+        [{"time": 0, "intensity": -1}],
+        [{"time": 0, "intensity": 2001}],
+        [{"time": 0, "intensity": float("nan")}],
+        [{"time": 0, "intensity": float("inf")}],
+        [{"time": 0, "intensity": "50"}],
+        [{"time": 10, "intensity": 0}],
+        [{"time": 0, "intensity": 0}, {"time": 1440, "intensity": 0}],
+        [{"time": 0, "intensity": 0}, {"time": 0, "intensity": 100}],
+        [
+            {"time": 0, "intensity": 0},
+            {"time": 20, "intensity": 100},
+            {"time": 10, "intensity": 0},
+        ],
+    ],
+)
+async def test_bad_schedule_points_fail_before_modifiers(points):
+    schedule = deepcopy(DAILY_SCHEDULE)
+    schedule["ramps"][0]["points"] = points
+    api, session = await connect(schedule)
+    with pytest.raises(ConnError) as error:
+        await api.async_get_schedule_plan()
+    assert error.value.endpoint == "schedule"
+    assert len(session.request.call_args_list) == 3
+
+
+@pytest.mark.parametrize(
+    "ramps",
+    [
+        None,
+        [],
+        [None, None],
+        [DAILY_SCHEDULE["ramps"][0]] * 2,
+        [{"color": "unknown", "points": []}, DAILY_SCHEDULE["ramps"][1]],
+        [{"color": [], "points": []}, DAILY_SCHEDULE["ramps"][1]],
+    ],
+)
+async def test_missing_or_duplicate_schedule_channels_fail(ramps):
+    api, _ = await connect({**DAILY_SCHEDULE, "ramps": ramps})
+    with pytest.raises(ConnError):
+        await api.async_get_schedule_plan()
+
+
+async def test_empty_and_constant_schedule_channels_wrap_at_midnight():
+    from aquaipy.schedule import describe_schedule, intensity_at, parse_ramps
+
+    schedule = deepcopy(DAILY_SCHEDULE)
+    schedule["ramps"][0]["points"] = []
+    schedule["ramps"][1]["points"] = [{"time": 0, "intensity": 100}]
+    api, _ = await connect()
+    plan = describe_schedule(schedule, api._primary_device, api._calculate_power, 1)
+    assert plan["power_curve"] == [
+        {"minute": 0, "power": 2},
+        {"minute": 1440, "power": 2},
+    ]
+    schedule["ramps"][1]["points"].append({"time": 1200, "intensity": 900})
+    ramps = parse_ramps(schedule, ("blue", "white"))
+    assert intensity_at(ramps["white"], 1320) == 500
+    assert intensity_at(ramps["white"], 1440) == 100
+    assert intensity_at(ramps["white"], 600) == 500
+
+
+@pytest.mark.parametrize("enabled", [None, 2, "false", [], 0.0])
+async def test_unknown_modifier_is_never_assumed_disabled(enabled):
+    api, _ = await connect(DAILY_SCHEDULE, {"response_code": 0, "enable": enabled})
+    with pytest.raises(ConnError) as error:
+        await api.async_get_schedule_plan()
+    assert error.value.endpoint == "schedule/acclimation"
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"month": 12},
+        {"day": 32},
+        {"hours": 24},
+        {"seconds": 60},
+        {"year": True},
+        {"gmt_offset": 86400},
+        {"minutes": "58"},
+    ],
+)
+async def test_invalid_lamp_clock_is_rejected(changed):
+    api, _ = await connect(
+        DAILY_SCHEDULE,
+        MODIFIER_OFF,
+        MODIFIER_OFF,
+        MODIFIER_OFF,
+        {**LAMP_CLOCK, **changed},
+    )
+    with pytest.raises(ConnError) as error:
+        await api.async_get_schedule_plan()
+    assert error.value.endpoint == "time"
+
+
 @pytest.mark.parametrize(
     ("percent", "intensity", "milliwatts"),
     [

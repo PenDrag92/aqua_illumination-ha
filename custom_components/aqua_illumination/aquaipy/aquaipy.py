@@ -18,6 +18,7 @@
 
 import asyncio
 import math
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from ipaddress import ip_address
 
@@ -25,6 +26,7 @@ import aiohttp
 
 # FIX 1: Use relative imports for vendoring
 from .error import ConnError, FirmwareError, MustBeParentError, TransientConnectionError
+from .schedule import describe_schedule
 
 MIN_SUPPORTED_AI_FIRMWARE_VERSION = "2.0.0"
 MAX_SUPPORTED_AI_FIRMWARE_VERSION = "2.5.1"
@@ -348,6 +350,60 @@ class AquaIPy:
         if not isinstance(value, (bool, int)) or value not in (0, 1):
             raise ConnError("Invalid schedule state", self._host)
         return bool(value)
+
+    async def async_get_schedule_plan(self):
+        """Read the base plan, modifier flags and lamp clock; never play a preview."""
+        data = await self._async_request("GET", "schedule")
+        try:
+            plan = describe_schedule(
+                data,
+                self._primary_device,
+                self._calculate_power,
+                1 + len(self._other_devices),
+            )
+        except (TypeError, ValueError, KeyError) as err:
+            raise ConnError(
+                "Invalid daily schedule", self._host, endpoint="schedule"
+            ) from err
+        modifiers = {}
+        for modifier in ("acclimation", "lunar", "storm"):
+            endpoint = f"schedule/{modifier}"
+            response = await self._async_request("GET", endpoint)
+            enabled = response.get("enable")
+            if not isinstance(enabled, (bool, int)) or enabled not in (0, 1):
+                raise ConnError(
+                    "Invalid schedule modifier", self._host, endpoint=endpoint
+                )
+            modifiers[modifier] = bool(enabled)
+        clock = await self._async_request("GET", "time")
+        try:
+            fields = (
+                "year",
+                "month",
+                "day",
+                "hours",
+                "minutes",
+                "seconds",
+                "gmt_offset",
+            )
+            if any(type(clock[field]) is not int for field in fields):
+                raise ValueError("Invalid clock value")
+            lamp_time = datetime(
+                clock["year"],
+                clock["month"] + 1,
+                clock["day"],
+                clock["hours"],
+                clock["minutes"],
+                clock["seconds"],
+                tzinfo=timezone(timedelta(seconds=clock["gmt_offset"])),
+            )
+        except (KeyError, TypeError, ValueError, OverflowError) as err:
+            raise ConnError("Invalid lamp clock", self._host, endpoint="time") from err
+        return {
+            **plan,
+            "modifiers": modifiers,
+            "lamp_time_at_read": lamp_time.isoformat(),
+        }
 
     def set_schedule_state(self, enable):
         return self._loop.run_until_complete(self.async_set_schedule_state(enable))

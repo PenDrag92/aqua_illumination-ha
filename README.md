@@ -5,7 +5,7 @@ A maintained fork of [razza-t/aqua_illumination-ha](https://github.com/razza-t/a
 
 ## Read-only first
 
-New installations start with **sensors only**. Updates of this fork preserve the
+New installations start with **read-only sensors and a read-only refresh button**. Updates of this fork preserve the
 saved IP address, name and manual-control option. Setup, polling,
 reconnection, diagnostics and unloading do not change brightness or the internal
 lighting schedule.
@@ -14,6 +14,7 @@ Available sensors:
 
 - Each color channel's brightness percentage, including HD values above 100%.
 - Internal schedule status (Scheduled / Manual).
+- The full daily base schedule, its modifier flags and a button to reread it.
 - Firmware version and connection status.
 - Last successful update and the detected number of lights (parent + children).
 - **Estimated LED power** in watts, including linked lights.
@@ -23,6 +24,36 @@ power tables. It is not measured mains power, excludes unmodelled losses and
 standby consumption, and is not an accumulated kWh energy counter. The power
 sensor also shows `detected_lights` and `child_lights`; no manual count is needed.
 Failed reads never produce a substitute zero-watt reading.
+
+## Reading and displaying the daily schedule
+
+**Schedule Plan** reads the actual stored program from the parent lamp: all
+channel time points, HD-aware brightness percentages and the estimated power
+curve for the parent and its linked children. This is the **base program**, not
+a measurement or a guarantee of future output. Acclimation, lunar and storm
+flags are included; their effects are not applied to the displayed base curve.
+The existing Schedule Status sensor shows whether that program is enabled.
+
+The plan is read at setup and every **30 minutes**, through the same device
+lock as live readings and commands. **Refresh Schedule** requests a new read
+after a change in the manufacturer's app. It only reads; it does not start a
+preview, activate the program or change any brightness. It works without
+enabling manual control.
+
+Optional plan reads have their own 10-second total deadline. If a read fails,
+live brightness/power readings remain usable and another plan read is attempted
+after five minutes. A previously read plan remains visible as **Cached**, with
+`last_read` and `last_read_error`; before the first successful read, the plan
+sensor is unavailable. Unsupported plan shapes are rejected instead of guessed.
+
+The sensor attributes `channels` and `power_curve` contain time points in
+minutes after **the lamp's local midnight**, including a closing point at 1440.
+`lamp_time_at_read` records the lamp clock, including its UTC offset. The plan
+does not include dates: it repeats daily. The two curve attributes are excluded
+from Recorder; the existing channel sensors provide the actual history.
+
+See [the dashboard example](docs/schedule-dashboard.md) for displaying the full
+day, including future time points, next to actual readings.
 
 ## Temporary Wi-Fi outages
 

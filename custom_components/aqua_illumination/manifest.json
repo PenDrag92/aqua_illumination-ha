@@ -11,5 +11,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/PenDrag92/aqua_illumination-ha/issues",
   "requirements": [],
-  "version": "2026.10.1"
+  "version": "2026.10.2"
 }

@@ -32,7 +32,7 @@ async def test_read_only_setup_poll_unload(hass, entry, lamp):
     coordinator = await setup(hass, entry)
     states = hass.states.async_all()
     assert states
-    assert all(state.domain == "sensor" for state in states)
+    assert all(state.domain in ("sensor", "button") for state in states)
     assert any(state.state == "150.0" for state in states)
     assert any(state.state == "Scheduled" for state in states)
     await coordinator.async_refresh()

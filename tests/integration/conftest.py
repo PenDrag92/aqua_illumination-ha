@@ -31,6 +31,17 @@ def lamp():
     }
     api.async_connect = AsyncMock()
     api.async_get_state = AsyncMock(side_effect=lambda: deepcopy(state))
+    api.async_get_schedule_plan = AsyncMock(
+        return_value={
+            "name": "default",
+            "channels": {"blue": [{"minute": 0, "brightness": 0}]},
+            "power_curve": [{"minute": 0, "power": 0}],
+            "device_count": 3,
+            "base_schedule": True,
+            "modifiers": {"acclimation": False, "lunar": False, "storm": False},
+            "lamp_time_at_read": "2026-10-14T08:00:00+02:00",
+        }
+    )
 
     async def set_colors(colors):
         state["colors"] = deepcopy(colors)
