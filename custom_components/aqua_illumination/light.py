@@ -18,6 +18,7 @@ class AquaIlluminationLight(AquaIlluminationEntity, LightEntity):
 
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
     _attr_color_mode = ColorMode.BRIGHTNESS
+    _requires_fresh_data = True
 
     def __init__(self, coordinator, channel):
         super().__init__(

@@ -29,11 +29,16 @@ class ConnError(Error):
     :ivar host: host
     """
 
-    def __init__(self, message, host):
+    def __init__(self, message, host, *, endpoint=None):
         """Initialise ConnError."""
         super().__init__(message)
         self.message = message
         self.host = host
+        self.endpoint = endpoint
+
+
+class TransientConnectionError(ConnError):
+    """A transport failure for which a later read may succeed."""
 
 
 class FirmwareError(Error):

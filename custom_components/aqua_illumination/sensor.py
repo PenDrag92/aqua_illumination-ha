@@ -17,6 +17,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
             AIPowerSensor(coordinator),
             AIDiagnosticSensor(coordinator, "Firmware Version", "firmware"),
             AIDiagnosticSensor(coordinator, "Connection Status", "connection"),
+            AILastSuccessfulUpdateSensor(coordinator),
+            AIDiagnosticSensor(coordinator, "Detected Lights", "detected_lights"),
             AIScheduleSensor(coordinator),
             *(
                 AIChannelBrightnessSensor(coordinator, channel)
@@ -43,7 +45,13 @@ class AIPowerSensor(AquaIlluminationEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"estimated": True, "includes_linked_lights": True}
+        return {
+            **super().extra_state_attributes,
+            "estimated": True,
+            "includes_linked_lights": True,
+            "detected_lights": self.coordinator.data["device_count"],
+            "child_lights": self.coordinator.data["device_count"] - 1,
+        }
 
 
 class AIChannelBrightnessSensor(AquaIlluminationEntity, SensorEntity):
@@ -81,7 +89,7 @@ class AIScheduleSensor(AquaIlluminationEntity, SensorEntity):
 
 
 class AIDiagnosticSensor(AquaIlluminationEntity, SensorEntity):
-    """Read-only diagnostics sharing the same availability handling."""
+    """Connection status remains visible even during an outage."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -93,4 +101,36 @@ class AIDiagnosticSensor(AquaIlluminationEntity, SensorEntity):
     def native_value(self):
         if self._type == "firmware":
             return self.coordinator.api.firmware_version
-        return "Connected"
+        if self._type == "detected_lights":
+            return self.coordinator.data["device_count"]
+        return self.coordinator.connection_status
+
+    @property
+    def available(self):
+        return self._type == "connection" or super().available
+
+    @property
+    def extra_state_attributes(self):
+        if self._type == "connection":
+            return self.coordinator.connection_diagnostics
+        return super().extra_state_attributes
+
+
+class AILastSuccessfulUpdateSensor(AquaIlluminationEntity, SensorEntity):
+    """Age reference that cached reads never advance."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator):
+        super().__init__(
+            coordinator, "last_successful_update", "Last Successful Update"
+        )
+
+    @property
+    def available(self):
+        return self.coordinator.last_successful_update is not None
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_successful_update

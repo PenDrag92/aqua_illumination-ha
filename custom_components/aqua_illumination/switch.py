@@ -13,6 +13,7 @@ class AIAutomatedScheduleSwitch(AquaIlluminationEntity, SwitchEntity):
     """The device's internal schedule, changed only by an explicit command."""
 
     _attr_icon = "mdi:calendar-clock"
+    _requires_fresh_data = True
 
     def __init__(self, coordinator):
         super().__init__(coordinator, "schedule_switch", "Scheduled Mode")
